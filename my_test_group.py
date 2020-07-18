@@ -22,96 +22,167 @@
 import csv
 from typing import Dict, Any
 from collections import deque
-from anytree import Node, RenderTree, NodeMixin
+
+import networkx as nx
+from networkx import Graph, DiGraph
 
 
 def process_citation_data(file_path):
     dict_data = {}
+
     with open(file_path, encoding="utf8") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            refs = row['known refs'].split('; ')
-            if len(refs) == 1 and refs[0] == '':
-                refs = []
+            refs = row['known refs'].split('; ')  # The second element of the tuple is transformed in a list of refs
+            if len(refs) == 1 and refs[0] == '':  # If there are no actual refs, the only element of the list is ''
+                refs = []  # In this case, refs should be only an empty list, without the ''
             dict_data[row['doi']] = (int(row['cited by']), refs)
 
+
+    #for r in dict_data:
+        #print(r + ": " + str(dict_data[r]))
 
     return dict_data
 
 
+def do_citation_graph(data, sse):
+    citation_graph = DiGraph()
 
-def do_get_coauthor(author, sse):
+    for doi in data:  # For each doi (the key of the dict data)
 
-    get_aut = list(set(sse.coauthor_network(author).nodes()))
-    get_aut.remove(author)
-    
-    return get_aut
-    # coauthors = set()
-    # author_search = sse.search(author, 'authors', False)  # it returns a list.
-    # for each in author_search:
-    #     coauthors.update(each['authors'].split('; '))
-    # coauthors.remove(author)
-    # return coauthors
+        if not data[doi][1] == []: # With this if we discard any article not involved in any citation
 
-def do_coauthor_hierarchy(data, sse, aut):
-    added_coaut = deque()
-    root_node = Node(aut, parent=None)
-    coaut_dict = dict()
-    list_of_coauthors = list(set(sse.coauthor_network(aut).nodes()))
-    list_of_coauthors.remove(aut)
-    coaut_dict[aut] = list_of_coauthors
-    visited =list()
-    visited.append(aut)
-    for item in list_of_coauthors:
-        added_coaut.append(item)
-    first_level = Node(list_of_coauthors, parent=root_node)
-    renderer = RenderTree(root_node)
-    #print(first_level)
-    #print(list_of_coauthors)
-    while added_coaut:
-        node_to_visit = added_coaut.popleft()
-        #print(node_to_visit)
-        visited.append(node_to_visit)
-        newsearch = do_get_coauthor(node_to_visit, sse)
-        print(list_of_coauthors)
-        for item in newsearch:
-            if item != aut and item not in visited:
-                added_coaut.append(item)
-                coaut_dict[node_to_visit] = newsearch
-    print(coaut_dict)
-    #print(coaut_dict)
-    #print(renderer)
-    #     for cocuk in coaut_dict.keys():
-    #         print(cocuk)
-    #         if cocuk not in visited:
-    #             added_coaut.append(cocuk)
-    #             visited.append(cocuk)
-    # coaut_dict[cocuk] = coaut_dict[newsearch]+1
-    #print(coaut_dict)
-    #     #print(node_to_visit)
-    # #if node_to_visit not in a:
-    #     coauthop = set(sse.coauthor_network(node_to_visit).nodes())
-    #     for key, value in coaut_dict:
-    #         coaut_dict[node_to_visit] = coauthop
-    #         print(coaut_dict)
+            result = sse.search(doi, 'doi', False)  # Get the info about the article searching with the doi on the 'doi' column.
+            # False because the output must not be a number.
 
-        # a.update(coauthors)
-        # a.remove(aut)
-        #
-        # #print(coauthors)
-        # if node_to_visit not in coaut_dict:
-        #     for key in a:
-        #         print(key)
-                # if key not in coaut_dict[node_to_visit][0]:
-                #     newlevel = coaut_dict[key]
-                #     for node_to_visit in newlevel:
-                #         coaut_dict.update({(do_get_coauthor(sse, node_to_visit))})
+            node_u = str(sse.pretty_print(result))  # Make the result pretty and turn it into a string so we can create a node
+            #if node_u not in citation_graph:
+            citation_graph.add_node(node_u)  # Add the node. The particular identifier of each node in the graph
+            # should be a string representing the article.
 
-        #coaut_dict[node_to_visit] = coauthors
-    #print(node_to_visit)
-    #print(coauthors)
-    #renderer = RenderTree(root_node)
-    #print(renderer)
-    #print(coaut_dict)
+            for ref in data[doi][1]:  # for each ref in the list of refs, which is the second element of the tuple associated to the doi (hence the 1)
+                result = sse.search(ref, 'doi', False)  # Do the same as before. Get the infos about the article identified by the ref
+                node_v = str(sse.pretty_print(result)) # Make it pretty and a string
+                #if node_v not in citation_graph:
+                citation_graph.add_node(node_v)
+                citation_graph.add_edge(node_u, node_v)  # Add the edge from the node representing the doi and the node representing the referenced doi
+
+    #citation_graph.nodes()
+    #citation_graph.edges()
+    return citation_graph
+
+def do_coupling(data, sse, doi_1, doi_2):
+    strenght= 0
+    for ref in data[doi_1][1]:
+        if ref in data[doi_2][1]:
+            strenght= strenght +1
+    return strenght
+
+def do_aut_coupling(data, sse, aut_1, aut_2):
+    coupling_strength = 0
+    refs = list()
+#    #locate the two authors in sse
+    retrieve_aut1 = sse.search(aut_1, 'authors', False)
+    retrieve_aut2 = sse.search(aut_2, 'authors', False)
+#    #once located, identify their doi
+    for index1 in range(len(retrieve_aut1)):
+        doi_aut1 = retrieve_aut1[index1]['doi']
+    for index2 in range(len(retrieve_aut2)):
+        doi_aut2 = retrieve_aut2[index2]['doi']
+        if (doi_aut1) != (doi_aut2):
+            for ref in data[doi_aut1][1]:
+                if ref in data[doi_aut2][1] and (ref not in refs):
+                    coupling_strength= coupling_strength +1
+                    refs.append(ref)
+    return coupling_strength
 
 
+def do_aut_distance(data, sse, aut):
+    coauthor_network = Graph()
+
+    visited = []
+    coauthors_to_be_visited = deque()
+    coauthors_to_be_visited.append(aut)
+
+    while len(coauthors_to_be_visited) > 0:
+        current_author = coauthors_to_be_visited.pop()
+        if current_author in visited:
+            continue
+        visited.append(current_author)
+        if current_author not in coauthor_network:
+            coauthor_network.add_node(current_author)
+
+        articles = sse.search(current_author, 'authors', False)
+        coauthor_dict = {}
+        for article in articles:
+            authors = article['authors'].split('; ')
+            for author in authors:  # For each author in the list of authors
+                if author != current_author:  # We take in account only the other authors
+                    if author in coauthor_dict:
+                        coauthor_dict[author] += 1
+                    else:
+                        coauthor_dict[author] = 1
+
+                    if author not in coauthor_network:
+                        coauthor_network.add_node(author)
+                    if author not in visited:
+                        coauthors_to_be_visited.append(author)
+
+        for coauthor in coauthor_dict:
+            coauthor_network.add_edge(current_author, coauthor, co_authored_papers=coauthor_dict[coauthor])
+
+    distances = calculateAllDistances(coauthor_network, aut)
+    nx.set_node_attributes(coauthor_network, distances, name="distance")
+    return coauthor_network
+
+
+def calculateAllDistances(coauthor_network, aut):
+    distance_dict = {}
+    visited = []
+    dist = 0
+    nodes_to_visit = [aut]
+
+    while len(visited) != len(coauthor_network.nodes):  # til all the nodes are visited
+
+        listAdj = []
+        for node in nodes_to_visit:
+            if node in visited:  # if node is already visited do nothing
+                continue
+            visited.append(node)  # mark the node as visited
+            if node not in distance_dict:
+                distance_dict[node] = dist  # if the distance is not set yet, set it
+
+            dist += 1  # increase the distance for the adjacents
+            for adjacent in coauthor_network[node]:
+                if adjacent not in visited:
+                    listAdj.append(
+                        adjacent)  # if the adjacent is not visited add it in the list of adjs for the next iteration
+                if adjacent not in distance_dict:
+                    distance_dict[adjacent] = dist  # already set their distances just because
+
+        nodes_to_visit = listAdj  # the next nodes to visit (in the next iteration) are the adjacents,
+        # so they all have the same distance
+
+    return distance_dict
+
+
+def do_cit_count_year(data, sse, aut, year):
+    citations_aut_list = list()
+    sumcitations = list()
+    for doi in data:
+        if not (data[doi][0] == 0 and data[doi][1] == []):
+            aut = sse.search(aut, 'authors', False)
+            result = sse.search(doi, 'doi', False)
+            for writer in aut:
+                if writer in result: # HOW TO CONNECT THE AUTHORS WITH THEIR DOI ARTICLES? I meant how to do this part "citations received by the papers authored by aut"
+                    citations_aut_list.append(result)
+
+    for article in citations_aut_list:
+        year = sse.search(year, 'year', False)
+        if article in year:
+            sumcitations = article + 1
+        else:
+            return sumcitations
+    year_citations = dict()
+    year_citations[int("year")] = sumcitations()
+    return year_citations
